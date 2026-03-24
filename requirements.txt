@@ -1,0 +1,9 @@
+streamlit
+langchain
+langchain-community
+langchain-text-splitters
+langchain-groq
+pypdf
+sentence-transformers
+pydantic==1.10.13
+chromadb==0.4.15
