@@ -11,7 +11,7 @@ from langchain_community.vectorstores import Chroma
 # ==========================================
 # 1. KONFIGURASI & API KEY
 # ==========================================
-st.set_page_config(page_title="AI PDF Translator Pro", page_icon="🌍", layout="wide")
+st.set_page_config(page_title="Multi-Language AI PDF Pro", page_icon="🌐", layout="wide")
 
 if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
@@ -53,7 +53,7 @@ def process_pdf(uploaded_file):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200)
         chunks = text_splitter.split_documents(pages)
         vectorstore = Chroma.from_documents(
-            documents=chunks, embedding=load_embeddings(), collection_name="translator_rag"
+            documents=chunks, embedding=load_embeddings(), collection_name="multi_lang_rag"
         )
         return vectorstore
     except Exception as e:
@@ -63,98 +63,74 @@ def process_pdf(uploaded_file):
 # ==========================================
 # 4. ANTARMUKA PENGGUNA (UI)
 # ==========================================
-st.title("🌍 AI PDF Multi-Language & Translator")
-st.markdown("Baca, Tanya, dan Terjemahkan dokumen PDF ke berbagai bahasa secara instan.")
+st.title("🌐 Multi-Language PDF Assistant")
+st.caption("AI akan menjawab sesuai dengan bahasa yang Anda gunakan (Indonesia/Inggris).")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- SIDEBAR SETTINGS ---
 with st.sidebar:
-    st.header("📁 Upload & Settings")
+    st.header("📁 Upload Center")
     pdf_file = st.file_uploader("Pilih file PDF", type="pdf")
-    
-    if st.button("🚀 Proses Dokumen"):
+    if st.button("🚀 Proses"):
         if pdf_file:
             with st.spinner("Menganalisis dokumen..."):
                 st.session_state.vectorstore = process_pdf(pdf_file)
-                st.success("Dokumen siap!")
-        else:
-            st.warning("Upload PDF terlebih dahulu.")
-
-    st.divider()
+                st.success("Siap dianalisis!")
     
-    # Fitur Translate
-    st.header("🌐 Fitur Terjemahan")
-    enable_translate = st.checkbox("Aktifkan Paksa Terjemahan")
-    target_lang = st.selectbox(
-        "Pilih Bahasa Tujuan:",
-        ["Indonesia", "English", "Japanese", "Mandarin", "Arabic", "German", "French", "Korean"],
-        disabled=not enable_translate
-    )
-
     st.divider()
-    if st.button("🗑️ Hapus Riwayat"):
+    if st.button("🗑️ Reset Chat"):
         st.session_state.messages = []
         st.rerun()
 
-# Menampilkan Riwayat Chat
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # ==========================================
-# 5. LOGIKA TANYA JAWAB & TRANSLATE
+# 5. LOGIKA TANYA JAWAB (MULTI-LANGUAGE)
 # ==========================================
-if prompt := st.chat_input("Tanyakan sesuatu atau minta terjemahkan bagian tertentu..."):
+if prompt := st.chat_input("Tanyakan sesuatu..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     if "vectorstore" in st.session_state:
         with st.chat_message("assistant"):
-            with st.spinner("Sedang memproses..."):
+            with st.spinner("Searching..."):
                 # A. Retrieval
                 search_results = st.session_state.vectorstore.similarity_search(prompt, k=4)
                 context = "\n\n".join([d.page_content for d in search_results])
                 pages = sorted(list(set([d.metadata.get('page', 0) + 1 for d in search_results])))
                 
-                # B. Generation dengan Logic Bahasa
+                # B. Generation dengan Instruksi Bahasa Otomatis
                 llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.1)
                 
-                # Menentukan Instruksi Bahasa
-                if enable_translate:
-                    lang_instruction = f"ALWAYS respond and translate the answer into {target_lang}."
-                else:
-                    lang_instruction = "Respond in the same language used by the user in their question."
-
-                system_prompt = f"""
-                You are a professional PDF assistant and translator.
-                
-                INSTRUCTIONS:
-                1. {lang_instruction}
-                2. Base your answer strictly on the provided CONTEXT.
-                3. If the user asks to translate a specific part, find it in the context and translate it accurately.
-                4. If the information is missing, state it clearly in the target language.
+                # System Prompt Cerdas
+                system_instruction = f"""
+                You are a professional assistant. 
+                1. Detect the language of the user's question.
+                2. Respond ONLY in the same language as the question (e.g., if user asks in Indonesian, answer in Indonesian. If in English, answer in English).
+                3. Base your answer strictly on the context provided below.
+                4. If the answer is not in the context, politely state that you don't know in the user's language.
 
                 CONTEXT:
                 {context}
                 """
                 
-                response = llm.invoke(system_prompt + f"\n\nUSER QUESTION: {prompt}")
+                response = llm.invoke(system_instruction + f"\n\nQUESTION: {prompt}")
                 answer = response.content
                 
-                # C. Tampilkan Jawaban
+                # C. Tampilkan Jawaban & Source Preview (Opsi A: st.info)
                 st.markdown(answer)
                 
-                # D. Preview Sumber (st.info)
-                with st.expander("🔍 Lihat Referensi Asli (Source Preview)"):
+                with st.expander("🔍 Source Preview (Original Text)"):
                     for i, doc in enumerate(search_results):
                         p_num = doc.metadata.get('page', 0) + 1
-                        st.markdown(f"**Sumber {i+1} - Halaman {p_num}:**")
+                        st.markdown(f"**Source {i+1} - Page {p_num}:**")
                         st.info(f"\"{doc.page_content}\"")
                 
-                # E. Simpan ke History
+                # D. Final Format untuk History & Logging
                 source_ref = f"\n\n> 📍 Referensi: Halaman {', '.join(map(str, pages))}"
                 full_res = answer + source_ref
                 
@@ -164,7 +140,7 @@ if prompt := st.chat_input("Tanyakan sesuatu atau minta terjemahkan bagian terte
                 st.session_state.messages.append({"role": "assistant", "content": full_res})
                 st.rerun()
     else:
-        st.info("💡 Silakan upload PDF dan klik 'Proses Dokumen' terlebih dahulu.")
+        st.info("Silakan upload PDF terlebih dahulu.")
 
 # Widget Feedback
 if "messages" in st.session_state and len(st.session_state.messages) > 0:
@@ -173,4 +149,4 @@ if "messages" in st.session_state and len(st.session_state.messages) > 0:
         feedback = st.feedback("thumbs")
         if feedback is not None:
             save_feedback(st.session_state.last_query, st.session_state.last_answer, feedback, st.session_state.last_pages)
-            st.toast("Feedback disimpan!")
+            st.toast("Feedback saved!")
