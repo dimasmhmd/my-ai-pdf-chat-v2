@@ -8,122 +8,134 @@ from langchain_community.vectorstores import Chroma
 
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(
-    page_title="AI PDF Chatbot (Groq Stable)",
-    page_icon="📄",
+    page_title="AI PDF Assistant Pro",
+    page_icon="🤖",
     layout="wide"
 )
 
 # --- 2. PENGATURAN API KEY ---
-# Pastikan Anda menggunakan GROQ_API_KEY di Streamlit Secrets
 if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 else:
-    st.error("⚠️ GROQ_API_KEY tidak ditemukan! Atur di Settings > Secrets.")
+    st.error("⚠️ Masukkan GROQ_API_KEY di Streamlit Secrets!")
     st.stop()
 
-# --- 3. FUNGSI RAG (PROSES DOKUMEN) ---
-@st.cache_resource # Agar model embedding tidak di-load berulang kali
-def get_embeddings():
+# --- 3. FUNGSI RAG TEROPTIMASI ---
+@st.cache_resource
+def load_embedding_model():
+    # Menggunakan model embedding lokal (HuggingFace) untuk stabilitas
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-def process_pdf(uploaded_file):
+def process_pdf_optimized(uploaded_file):
     try:
-        # Simpan file PDF sementara
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.getbuffer())
         
-        # Load dan pecah PDF menjadi potongan teks
         loader = PyPDFLoader("temp.pdf")
         pages = loader.load()
         
+        # OPTIMASI: Splitter dengan separators agar paragraf tidak terpotong kasar
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
-            chunk_overlap=200
+            chunk_size=1200,      
+            chunk_overlap=200,    
+            separators=["\n\n", "\n", ". ", " ", ""]
         )
         chunks = text_splitter.split_documents(pages)
         
-        # Buat database vektor di dalam RAM
-        embeddings = get_embeddings()
+        embeddings = load_embedding_model()
+        
+        # Simpan ke ChromaDB (In-Memory)
         vectorstore = Chroma.from_documents(
             documents=chunks, 
             embedding=embeddings,
-            collection_name="pdf_chat_groq"
+            collection_name="pdf_optimized_db"
         )
         return vectorstore
     except Exception as e:
         st.error(f"Gagal memproses PDF: {e}")
         return None
 
-# --- 4. ANTARMUKA CHAT (UI) ---
-st.title("📄 Smart PDF Explorer")
-st.markdown("Tanya jawab dengan dokumen Anda menggunakan **RAG + Groq Llama 3.1**")
+# --- 4. ANTARMUKA PENGGUNA (UI) ---
+st.title("📄 Smart PDF Assistant (Optimized)")
+st.caption("Versi 2.0: Dilengkapi dengan Pelacakan Sumber Halaman & Akurasi Tinggi")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar untuk area kontrol
+# Sidebar
 with st.sidebar:
-    st.header("📁 Unggah Dokumen")
-    uploaded_pdf = st.file_uploader("Pilih file PDF", type="pdf")
+    st.header("⚙️ Kontrol Dokumen")
+    uploaded_pdf = st.file_uploader("Unggah PDF (Maks 10MB)", type="pdf")
     
-    if st.button("🚀 Proses Dokumen"):
+    if st.button("🚀 Mulai Analisis"):
         if uploaded_pdf:
-            with st.spinner("Sedang menganalisis PDF..."):
-                st.session_state.vectorstore = process_pdf(uploaded_pdf)
-                st.success("Dokumen siap dianalisis!")
+            with st.spinner("Sedang memetakan isi dokumen..."):
+                st.session_state.vectorstore = process_pdf_optimized(uploaded_pdf)
+                st.success("Analisis selesai! AI sekarang memahami dokumen Anda.")
         else:
             st.warning("Pilih file PDF terlebih dahulu.")
     
-    if st.button("🗑️ Hapus Chat"):
+    st.divider()
+    if st.button("🗑️ Reset Percakapan"):
         st.session_state.messages = []
         st.rerun()
 
-# Menampilkan riwayat chat
+# Menampilkan Riwayat Chat
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 5. LOGIKA TANYA JAWAB ---
-if prompt := st.chat_input("Apa yang ingin Anda ketahui dari dokumen ini?"):
-    # Tampilkan input user
+# --- 5. LOGIKA RETRIEVAL & GENERATION (OPTIMIZED) ---
+if prompt := st.chat_input("Tanyakan sesuatu tentang isi dokumen..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Respon AI
     if "vectorstore" in st.session_state:
         with st.chat_message("assistant"):
-            with st.spinner("Berpikir cepat dengan Groq..."):
+            with st.spinner("Mencari referensi terpercaya..."):
+                # 1. RETRIEVAL: Mencari 5 potongan teks paling relevan
+                search_results = st.session_state.vectorstore.similarity_search(prompt, k=5)
+                
+                # 2. CONTEXT BUILDING: Menggabungkan teks & mengambil metadata halaman
+                context_parts = []
+                pages_found = set()
+                
+                for doc in search_results:
+                    context_parts.append(doc.page_content)
+                    # Metadata halaman (tambah 1 karena index mulai dari 0)
+                    page_num = doc.metadata.get("page", 0) + 1
+                    pages_found.add(page_num)
+                
+                context_text = "\n\n---\n\n".join(context_parts)
+                sorted_pages = sorted(list(pages_found))
+
+                # 3. GENERATION: Memanggil Llama 3.1 melalui Groq
                 try:
-                    # 1. Ambil konteks paling relevan (Retrieval)
-                    docs = st.session_state.vectorstore.similarity_search(prompt, k=4)
-                    context = "\n\n".join([doc.page_content for doc in docs])
+                    llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.1)
                     
-                    # 2. Siapkan Model LLM (Llama 3.1 - Versi Terbaru)
-                    llm = ChatGroq(
-                        model_name="llama-3.1-8b-instant", 
-                        temperature=0.1
-                    )
+                    system_instruction = f"""
+                    Anda adalah asisten AI profesional. Jawablah pertanyaan user hanya berdasarkan konteks dokumen di bawah ini.
                     
-                    # 3. Gabungkan Konteks dengan Pertanyaan
-                    full_prompt = f"""
-                    Anda adalah asisten AI yang membantu. Jawablah pertanyaan user HANYA berdasarkan konteks dokumen di bawah ini.
-                    Jika jawaban tidak ada dalam dokumen, katakan bahwa Anda tidak menemukannya.
-
                     KONTEKS DOKUMEN:
-                    {context}
-
-                    PERTANYAAN USER: 
-                    {prompt}
+                    {context_text}
+                    
+                    INSTRUKSI:
+                    1. Jika jawaban tidak ditemukan, katakan 'Maaf, saya tidak menemukan informasi tersebut di dokumen.'
+                    2. Jawab dengan bahasa yang sopan dan terstruktur.
                     """
                     
-                    response = llm.invoke(full_prompt)
+                    response = llm.invoke(system_instruction + f"\n\nPERTANYAAN: {prompt}")
                     answer = response.content
                     
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                    # Tambahkan footer Sumber Referensi Halaman
+                    source_footer = f"\n\n> 📍 **Referensi:** Ditemukan pada halaman {', '.join(map(str, sorted_pages))}"
+                    full_response = answer + source_footer
+                    
+                    st.markdown(full_response)
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
                 
                 except Exception as e:
-                    st.error(f"Terjadi kesalahan saat menghubungi Groq: {e}")
+                    st.error(f"Terjadi kendala pada otak AI: {e}")
     else:
-        st.info("💡 Silakan upload PDF dan klik 'Proses' di sidebar terlebih dahulu.")
+        st.info("💡 Silakan unggah PDF dan klik 'Mulai Analisis' terlebih dahulu.")
