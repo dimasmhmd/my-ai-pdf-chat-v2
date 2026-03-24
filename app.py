@@ -11,7 +11,7 @@ from langchain_community.vectorstores import Chroma
 # ==========================================
 # 1. KONFIGURASI & API KEY
 # ==========================================
-st.set_page_config(page_title="AI PDF Pro + Monitoring", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Multi-Language AI PDF Pro", page_icon="🌐", layout="wide")
 
 if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
@@ -20,10 +20,9 @@ else:
     st.stop()
 
 # ==========================================
-# 2. FUNGSI LOGGING & EVALUASI (LLMOps)
+# 2. FUNGSI LOGGING (LLMOps)
 # ==========================================
 def save_feedback(user_query, ai_response, rating, pages):
-    """Menyimpan feedback pengguna ke file CSV lokal."""
     log_file = "logs_evaluasi.csv"
     feedback_data = {
         "timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
@@ -49,123 +48,105 @@ def process_pdf(uploaded_file):
     try:
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.getbuffer())
-        
         loader = PyPDFLoader("temp.pdf")
         pages = loader.load()
-        
-        # Splitter Teroptimasi
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1200, chunk_overlap=200, 
-            separators=["\n\n", "\n", ". ", " ", ""]
-        )
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200)
         chunks = text_splitter.split_documents(pages)
-        
         vectorstore = Chroma.from_documents(
-            documents=chunks, 
-            embedding=load_embeddings(),
-            collection_name="pdf_log_db"
+            documents=chunks, embedding=load_embeddings(), collection_name="multi_lang_rag"
         )
         return vectorstore
     except Exception as e:
-        st.error(f"Gagal proses PDF: {e}")
+        st.error(f"Error: {e}")
         return None
 
 # ==========================================
 # 4. ANTARMUKA PENGGUNA (UI)
 # ==========================================
-st.title("📄 Smart PDF Explorer & Auditor")
-st.markdown("Sistem RAG Teroptimasi dengan Fitur Monitoring Evaluasi.")
+st.title("🌐 Multi-Language PDF Assistant")
+st.caption("AI akan menjawab sesuai dengan bahasa yang Anda gunakan (Indonesia/Inggris).")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar
 with st.sidebar:
-    st.header("📁 Unggah & Kontrol")
-    pdf_file = st.file_uploader("Pilih PDF", type="pdf")
-    
-    if st.button("🚀 Proses Dokumen"):
+    st.header("📁 Upload Center")
+    pdf_file = st.file_uploader("Pilih file PDF", type="pdf")
+    if st.button("🚀 Proses"):
         if pdf_file:
-            with st.spinner("Menganalisis..."):
+            with st.spinner("Menganalisis dokumen..."):
                 st.session_state.vectorstore = process_pdf(pdf_file)
-                st.success("Analisis Selesai!")
-        else:
-            st.warning("Pilih file dulu.")
+                st.success("Siap dianalisis!")
     
     st.divider()
-    if st.button("🗑️ Hapus Chat"):
+    if st.button("🗑️ Reset Chat"):
         st.session_state.messages = []
         st.rerun()
-    
-    # Statistik Singkat Feedback
-    if os.path.exists("logs_evaluasi.csv"):
-        st.header("📊 Statistik Feedback")
-        df_log = pd.read_csv("logs_evaluasi.csv")
-        st.write(df_log['rating'].value_counts())
 
-# Tampilkan Chat
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # ==========================================
-# 5. LOGIKA TANYA JAWAB & FEEDBACK (WITH CODE BLOCK PREVIEW)
+# 5. LOGIKA TANYA JAWAB (MULTI-LANGUAGE)
 # ==========================================
-if prompt := st.chat_input("Tanyakan isi PDF..."):
+if prompt := st.chat_input("Tanyakan sesuatu..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     if "vectorstore" in st.session_state:
         with st.chat_message("assistant"):
-            with st.spinner("Mencari referensi..."):
-                # A. Retrieval (Mengambil data teks asli)
+            with st.spinner("Searching..."):
+                # A. Retrieval
                 search_results = st.session_state.vectorstore.similarity_search(prompt, k=4)
-                context_text = "\n\n".join([d.page_content for d in search_results])
+                context = "\n\n".join([d.page_content for d in search_results])
                 pages = sorted(list(set([d.metadata.get('page', 0) + 1 for d in search_results])))
                 
-                # B. Generation (LLM)
+                # B. Generation dengan Instruksi Bahasa Otomatis
                 llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.1)
-                full_prompt = f"Gunakan konteks ini: {context_text}\n\nPertanyaan: {prompt}"
-                response = llm.invoke(full_prompt)
+                
+                # System Prompt Cerdas
+                system_instruction = f"""
+                You are a professional assistant. 
+                1. Detect the language of the user's question.
+                2. Respond ONLY in the same language as the question (e.g., if user asks in Indonesian, answer in Indonesian. If in English, answer in English).
+                3. Base your answer strictly on the context provided below.
+                4. If the answer is not in the context, politely state that you don't know in the user's language.
+
+                CONTEXT:
+                {context}
+                """
+                
+                response = llm.invoke(system_instruction + f"\n\nQUESTION: {prompt}")
                 answer = response.content
                 
-                # C. Menampilkan Jawaban Utama
+                # C. Tampilkan Jawaban & Source Preview (Opsi A: st.info)
                 st.markdown(answer)
                 
-                # --- OPTIMASI VISUAL OPSI B (Code Block) ---
-                with st.expander("📝 Lihat Teks Sumber Asli (Raw Data)", expanded=False):
+                with st.expander("🔍 Source Preview (Original Text)"):
                     for i, doc in enumerate(search_results):
                         p_num = doc.metadata.get('page', 0) + 1
-                        st.markdown(f"**Sumber {i+1} (Halaman {p_num}):**")
-                        # Menggunakan st.code tanpa bahasa agar warna abu-abu stabil
-                        st.code(doc.page_content, language=None)
+                        st.markdown(f"**Source {i+1} - Page {p_num}:**")
+                        st.info(f"\"{doc.page_content}\"")
                 
-                # D. Final Format untuk History
-                source_footer = f"\n\n> 📍 **Referensi:** Halaman {', '.join(map(str, pages))}"
-                full_response = answer + source_footer
+                # D. Final Format untuk History & Logging
+                source_ref = f"\n\n> 📍 Referensi: Halaman {', '.join(map(str, pages))}"
+                full_res = answer + source_ref
                 
-                # Simpan data untuk feedback & history
                 st.session_state.last_query = prompt
-                st.session_state.last_answer = full_response
+                st.session_state.last_answer = full_res
                 st.session_state.last_pages = pages
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                st.session_state.messages.append({"role": "assistant", "content": full_res})
                 st.rerun()
     else:
-        st.info("Upload PDF dulu.")
+        st.info("Silakan upload PDF terlebih dahulu.")
 
-# Menampilkan Widget Feedback di bawah pesan terakhir
+# Widget Feedback
 if "messages" in st.session_state and len(st.session_state.messages) > 0:
     if st.session_state.messages[-1]["role"] == "assistant":
         st.write("---")
-        st.caption("Bantu kami meningkatkan akurasi: Apakah jawaban ini membantu?")
         feedback = st.feedback("thumbs")
-        
         if feedback is not None:
-            save_feedback(
-                user_query=st.session_state.last_query,
-                ai_response=st.session_state.last_answer,
-                rating=feedback,
-                pages=st.session_state.last_pages
-            )
-            st.toast("Feedback tersimpan!", icon="✅")
+            save_feedback(st.session_state.last_query, st.session_state.last_answer, feedback, st.session_state.last_pages)
+            st.toast("Feedback saved!")
