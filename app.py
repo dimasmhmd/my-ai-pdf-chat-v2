@@ -71,12 +71,12 @@ if "messages" not in st.session_state:
 
 with st.sidebar:
     st.header("📁 Upload Center")
-    pdf_file = st.file_uploader("Pilih file PDF", type="pdf")
+    pdf_file = st.file_uploader("Select PDF file", type="pdf")
     if st.button("🚀 Proses"):
         if pdf_file:
-            with st.spinner("Menganalisis dokumen..."):
+            with st.spinner("Analyzing documents..."):
                 st.session_state.vectorstore = process_pdf(pdf_file)
-                st.success("Siap dianalisis!")
+                st.success("Ready to be analyzed!")
     
     st.divider()
     if st.button("🗑️ Reset Chat"):
