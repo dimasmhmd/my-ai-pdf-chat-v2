@@ -109,7 +109,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # ==========================================
-# 5. LOGIKA TANYA JAWAB & FEEDBACK
+# 5. LOGIKA TANYA JAWAB & FEEDBACK (WITH SOURCE PREVIEW)
 # ==========================================
 if prompt := st.chat_input("Tanyakan isi PDF..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -119,23 +119,34 @@ if prompt := st.chat_input("Tanyakan isi PDF..."):
     if "vectorstore" in st.session_state:
         with st.chat_message("assistant"):
             with st.spinner("Mencari referensi..."):
-                # A. Retrieval
+                # A. Retrieval (Mengambil data teks asli)
                 search_results = st.session_state.vectorstore.similarity_search(prompt, k=4)
-                context = "\n\n".join([d.page_content for d in search_results])
+                
+                context_text = "\n\n".join([d.page_content for d in search_results])
                 pages = sorted(list(set([d.metadata.get('page', 0) + 1 for d in search_results])))
                 
-                # B. Generation
+                # B. Generation (LLM)
                 llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.1)
-                full_prompt = f"Gunakan konteks ini: {context}\n\nPertanyaan: {prompt}"
-                
+                full_prompt = f"Gunakan konteks ini: {context_text}\n\nPertanyaan: {prompt}"
                 response = llm.invoke(full_prompt)
                 answer = response.content
                 
-                # C. Final Format
-                full_response = f"{answer}\n\n> 📍 **Referensi:** Halaman {', '.join(map(str, pages))}"
-                st.markdown(full_response)
+                # C. Menampilkan Jawaban Utama
+                st.markdown(answer)
                 
-                # Simpan data untuk feedback
+                # D. Menampilkan Potongan Data Sumber (Source Preview)
+                with st.expander("🔍 Lihat Potongan Data Sumber (Source Preview)"):
+                    for i, doc in enumerate(search_results):
+                        p_num = doc.metadata.get('page', 0) + 1
+                        st.markdown(f"**Sumber {i+1} (Halaman {p_num}):**")
+                        st.caption(f"\"{doc.page_content[:300]}...\"") # Menampilkan 300 karakter pertama
+                        st.divider()
+
+                # E. Final Format untuk History
+                source_footer = f"\n\n> 📍 **Referensi:** Halaman {', '.join(map(str, pages))}"
+                full_response = answer + source_footer
+                
+                # Simpan data untuk feedback & history
                 st.session_state.last_query = prompt
                 st.session_state.last_answer = full_response
                 st.session_state.last_pages = pages
