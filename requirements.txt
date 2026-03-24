@@ -8,3 +8,4 @@ pypdf
 sentence-transformers
 pydantic==1.10.13
 chromadb==0.4.15
+gTTS
