@@ -148,7 +148,7 @@ if prompt := st.chat_input("Tanyakan isi PDF..."):
 if "messages" in st.session_state and len(st.session_state.messages) > 0:
     if st.session_state.messages[-1]["role"] == "assistant":
         st.write("---")
-        st.caption("Bantu kami meningkatkan akurasi: Apakah jawaban ini benar?")
+        st.caption("Bantu kami meningkatkan akurasi: Apakah jawaban ini membantu?")
         feedback = st.feedback("thumbs")
         
         if feedback is not None:
