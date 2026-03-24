@@ -109,7 +109,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # ==========================================
-# 5. LOGIKA TANYA JAWAB & FEEDBACK (WITH SOURCE PREVIEW)
+# 5. LOGIKA TANYA JAWAB & FEEDBACK (WITH CODE BLOCK PREVIEW)
 # ==========================================
 if prompt := st.chat_input("Tanyakan isi PDF..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -121,7 +121,6 @@ if prompt := st.chat_input("Tanyakan isi PDF..."):
             with st.spinner("Mencari referensi..."):
                 # A. Retrieval (Mengambil data teks asli)
                 search_results = st.session_state.vectorstore.similarity_search(prompt, k=4)
-                
                 context_text = "\n\n".join([d.page_content for d in search_results])
                 pages = sorted(list(set([d.metadata.get('page', 0) + 1 for d in search_results])))
                 
@@ -134,15 +133,15 @@ if prompt := st.chat_input("Tanyakan isi PDF..."):
                 # C. Menampilkan Jawaban Utama
                 st.markdown(answer)
                 
-                # D. Menampilkan Potongan Data Sumber (Source Preview)
-                with st.expander("🔍 Lihat Potongan Data Sumber (Source Preview)"):
+                # --- OPTIMASI VISUAL OPSI B (Code Block) ---
+                with st.expander("📝 Lihat Teks Sumber Asli (Raw Data)", expanded=False):
                     for i, doc in enumerate(search_results):
                         p_num = doc.metadata.get('page', 0) + 1
                         st.markdown(f"**Sumber {i+1} (Halaman {p_num}):**")
-                        st.caption(f"\"{doc.page_content[:300]}...\"") # Menampilkan 300 karakter pertama
-                        st.divider()
-
-                # E. Final Format untuk History
+                        # Menggunakan st.code tanpa bahasa agar warna abu-abu stabil
+                        st.code(doc.page_content, language=None)
+                
+                # D. Final Format untuk History
                 source_footer = f"\n\n> 📍 **Referensi:** Halaman {', '.join(map(str, pages))}"
                 full_response = answer + source_footer
                 
